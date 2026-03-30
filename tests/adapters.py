@@ -8,7 +8,7 @@ from torch import Tensor
 from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizerBase
 
-from cs336_alignment.implementation import mmlu_baseline
+from cs336_alignment.implementation import mmlu_baseline, gsm8k_baseline
 
 
 def run_tokenize_prompt_and_output(
@@ -371,7 +371,7 @@ def run_parse_gsm8k_response(
         str with the predicted numeric answer if the model output can be parsed into a prediction,
         else None.
     """
-    raise NotImplementedError
+    return gsm8k_baseline(model_output)
 
 
 def run_compute_per_instance_dpo_loss(

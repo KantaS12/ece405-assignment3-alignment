@@ -15,3 +15,22 @@ def mmlu_baseline(mmlu_example: dict[str, Any], model_output: str) -> str | None
         print(f"Error parsing model output: {e}")
 
     return None
+
+def gsm8k_baseline(model_output: str) -> str | None:
+    # Parse the model output to extract the predicted answer
+    
+    # Strip commas first
+    clean_output = model_output.replace(',', '')
+
+    # Find all numbers in the output
+    numbers = re.findall(r'[-+]?\d*\.?\d+', clean_output)
+    try:
+      if numbers:
+          return numbers[-1]
+      return None
+      
+    except Exception as e:
+        print(f"Error parsing model output: {e}")
+
+    return None
+

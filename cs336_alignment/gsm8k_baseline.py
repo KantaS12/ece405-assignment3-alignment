@@ -8,13 +8,10 @@ import torch
 import json
 import random
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from implementation import mmlu_baseline
+from implementation import gsm8k_baseline
 
-# Load MMLU examples
-script_dir = os.path.dirname(os.path.abspath(__file__))
-folder_path = os.path.abspath(os.path.join(script_dir, "../data/mmlu/dev"))
-small_model_path = os.path.abspath(os.path.join(script_dir, "../models/Qwen_Qwen2.5-0.5B"))
-medium_model_path = os.path.abspath(os.path.join(script_dir, "../models/Qwen_Qwen2.5-3B-Instruct"))
+small_model_path= os.path.expanduser("../models/Qwen_Qwen2.5-0.5B")
+medium_model_path = os.path.expanduser("../models/Qwen_Qwen2.5-3B-Instruct")
 
 # Load the small model and tokenizer
 small_model = AutoModelForCausalLM.from_pretrained(small_model_path, trust_remote_code=True)
@@ -25,33 +22,33 @@ medium_model = AutoModelForCausalLM.from_pretrained(medium_model_path, trust_rem
 medium_tokenizer = AutoTokenizer.from_pretrained(medium_model_path, trust_remote_code=True)
 medium_tokenizer.padding_side = "left"
 
-mmlu_examples = []
-for filename in os.listdir(folder_path):
-    if filename.endswith(".csv"):
-        data = pd.read_csv(os.path.join(folder_path, filename))
-        # Format example as string prompts
+# Load GSM8k examples
+test_jsonl_path = os.path.expanduser("../data/gsm8k/test.jsonl")
+train_jsonl_path = os.path.expanduser("../data/gsm8k/train.jsonl")
 
-        for _, row in data.iterrows():
-            question = row.iloc[0]
-            options = [row.iloc[1], row.iloc[2], row.iloc[3], row.iloc[4]]
-            answer = row.iloc[5]
+# Read jsonl files
+gsm8k_examples = []
+with open(train_jsonl_path, "r") as f:
+    for line in f:
+        train_data = json.loads(line)
+        question = train_data["question"]
+        raw_answer = train_data["answer"]
 
-            string_prompt = f"Question: {question}\nOptions:\nA. {options[0]}\nB. {options[1]}\nC. {options[2]}\nD. {options[3]}\nAnswer:"        
-            
-            mmlu_examples.append((string_prompt, answer)) 
-        
+        ground_truth_number = raw_answer.split("####")[-1].strip()
+        string_prompt = f"Question: {question}\nAnswer:"
+        gsm8k_examples.append((string_prompt, ground_truth_number))
+
 
 # String matching evaluation
 tp_count = 0
 fp_count = 0
 failed_parse_count = 0
-
 generation_times = []
 all_results = []
 incorrect_examples = []
 
-for string_prompt, ground in mmlu_examples:
-
+for string_prompt, ground in gsm8k_examples:
+    
     if not string_prompt:
         continue
 
@@ -79,7 +76,7 @@ for string_prompt, ground in mmlu_examples:
 
     upper_model_output = model_output.upper()
 
-    prediction = mmlu_baseline(None, upper_model_output)
+    prediction = gsm8k_baseline(None, upper_model_output)
 
     is_correct = prediction == ground
 
@@ -105,7 +102,6 @@ for string_prompt, ground in mmlu_examples:
         "is_correct": is_correct
     })
 
-
 # Aggregate results
 total_questions = tp_count + fp_count
 
@@ -122,8 +118,7 @@ print(f"Total Questions: {total_questions}")
 print(f"Accuracy: {accuracy_score:.4f}")
 print(f"Average Generation Time: {average_time:.2f} seconds per question")
 
-output_filename = "Qwen_3B_results.json"
-
+output_filename = "Qwen_3B_gsm8k_results.json"
 with open(output_filename, "w") as f:
     json.dump(all_results, f, indent=4)
 
