@@ -10,8 +10,13 @@ import random
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from implementation import gsm8k_baseline
 
-small_model_path= os.path.expanduser("../models/Qwen_Qwen2.5-0.5B")
-medium_model_path = os.path.expanduser("../models/Qwen_Qwen2.5-3B-Instruct")
+# Load GSM8k examples
+script_dir = os.path.dirname(os.path.abspath(__file__))
+test_jsonl_path = os.path.abspath(os.path.join(script_dir, "../data/gsm8k/test.jsonl"))
+train_jsonl_path = os.path.abspath(os.path.join(script_dir, "../data/gsm8k/train.jsonl"))
+
+small_model_path = os.path.abspath(os.path.join(script_dir, "../models/Qwen_Qwen2.5-0.5B"))
+medium_model_path = os.path.abspath(os.path.join(script_dir, "../models/Qwen_Qwen2.5-3B-Instruct"))
 
 # Load the small model and tokenizer
 small_model = AutoModelForCausalLM.from_pretrained(small_model_path, trust_remote_code=True)
@@ -21,10 +26,6 @@ small_tokenizer = AutoTokenizer.from_pretrained(small_model_path, trust_remote_c
 medium_model = AutoModelForCausalLM.from_pretrained(medium_model_path, trust_remote_code=True)
 medium_tokenizer = AutoTokenizer.from_pretrained(medium_model_path, trust_remote_code=True)
 medium_tokenizer.padding_side = "left"
-
-# Load GSM8k examples
-test_jsonl_path = os.path.expanduser("../data/gsm8k/test.jsonl")
-train_jsonl_path = os.path.expanduser("../data/gsm8k/train.jsonl")
 
 # Read jsonl files
 gsm8k_examples = []
