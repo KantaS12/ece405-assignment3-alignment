@@ -18,12 +18,16 @@ train_jsonl_path = os.path.abspath(os.path.join(script_dir, "../data/gsm8k/train
 small_model_path = os.path.abspath(os.path.join(script_dir, "../models/Qwen_Qwen2.5-0.5B"))
 medium_model_path = os.path.abspath(os.path.join(script_dir, "../models/Qwen_Qwen2.5-3B-Instruct"))
 
+# Determine device
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
 # Load the small model and tokenizer
-small_model = AutoModelForCausalLM.from_pretrained(small_model_path, trust_remote_code=True)
+small_model = AutoModelForCausalLM.from_pretrained(small_model_path, trust_remote_code=True).to(device)
 small_tokenizer = AutoTokenizer.from_pretrained(small_model_path, trust_remote_code=True)
+small_tokenizer.padding_side = "left"
 
 # Load the medium model and tokenizer
-medium_model = AutoModelForCausalLM.from_pretrained(medium_model_path, trust_remote_code=True)
+medium_model = AutoModelForCausalLM.from_pretrained(medium_model_path, trust_remote_code=True).to(device)
 medium_tokenizer = AutoTokenizer.from_pretrained(medium_model_path, trust_remote_code=True)
 medium_tokenizer.padding_side = "left"
 
@@ -54,7 +58,7 @@ for string_prompt, ground in gsm8k_examples:
         continue
 
     # Tokenize
-    prediction = medium_tokenizer(string_prompt, return_tensors="pt", padding=True)
+    prediction = small_tokenizer(string_prompt, return_tensors="pt", padding=True).to(device)
     prediction_length = prediction.input_ids.shape[1]
 
     if torch.cuda.is_available():
@@ -62,7 +66,7 @@ for string_prompt, ground in gsm8k_examples:
     start_time = time.perf_counter()
 
     # Generate
-    prediction_tensors = medium_model.generate(**prediction, max_new_tokens=256, pad_token_id=medium_tokenizer.eos_token_id)
+    prediction_tensors = small_model.generate(**prediction, max_new_tokens=256, pad_token_id=small_tokenizer.eos_token_id)
 
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -73,11 +77,11 @@ for string_prompt, ground in gsm8k_examples:
 
     # Decode
     generated_tokens = prediction_tensors[0][prediction_length:]
-    model_output = medium_tokenizer.decode(generated_tokens, skip_special_tokens=True)
+    model_output = small_tokenizer.decode(generated_tokens, skip_special_tokens=True)
 
     upper_model_output = model_output.upper()
 
-    prediction = gsm8k_baseline(None, upper_model_output)
+    prediction = gsm8k_baseline(upper_model_output)
 
     is_correct = prediction == ground
 
@@ -119,7 +123,11 @@ print(f"Total Questions: {total_questions}")
 print(f"Accuracy: {accuracy_score:.4f}")
 print(f"Average Generation Time: {average_time:.2f} seconds per question")
 
-output_filename = "Qwen_3B_gsm8k_results.json"
+output_dir = os.path.join(script_dir, "output")
+os.makedirs(output_dir, exist_ok=True)
+
+output_filename = os.path.join(output_dir, "Qwen_0.5B_gsm8k_results.json")
+
 with open(output_filename, "w") as f:
     json.dump(all_results, f, indent=4)
 
