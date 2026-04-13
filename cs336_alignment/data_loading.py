@@ -3,7 +3,7 @@ import json
 import random
 
 class SFTDataLoading:
-    def __init__(self, tokenizer, dataset_path, seq_length, shuffle):
+    def __init__(self, tokenizer, dataset_path, seq_length, shuffle, num_examples=None):
         self.tokenizer = tokenizer
         self.seq_length = seq_length
         self.packed_data = []
@@ -12,20 +12,27 @@ class SFTDataLoading:
         raw_data = []
         with open(dataset_path, 'r', encoding='utf-8') as f:
             for line in f:
-                if line.strip(): 
+                if line.strip():
                     raw_data.append(json.loads(line))
 
         # Shuffle the dataset if required
         if shuffle:
             random.shuffle(raw_data)
 
+        # Optionally limit to a fixed number of examples
+        if num_examples is not None:
+            raw_data = raw_data[:num_examples]
+
         # Tokenize and flatten into 1D list of tokens
         all_tokens = []
         for item in raw_data:
+            # Support Alpaca-style keys and GSM8K-style keys
+            prompt = item.get('prompt') or item.get('instruction') or item.get('question', '')
+            response = item.get('response') or item.get('output') or item.get('answer', '')
             text_string = (
                 "Below is an instruction that describes a task. "
                 "Write a response that appropriately completes the request.\n\n"
-                f"### Instruction:\n{item['prompt']}\n\n### Response:\n{item['response']}"
+                f"### Instruction:\n{prompt}\n\n### Response:\n{response}"
             )
             
             tokens = self.tokenizer(text_string, add_special_tokens=True)["input_ids"]
