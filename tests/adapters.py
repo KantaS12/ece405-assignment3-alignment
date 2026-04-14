@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 from typing import Any, Callable, Literal
 
@@ -8,7 +9,16 @@ from torch import Tensor
 from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizerBase
 
-from cs336_alignment.implementation import mmlu_baseline, gsm8k_baseline, iterate_batches
+_spring_impl_path = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "..", "cs336_alignment", "spring-2026", "implementation.py"
+)
+_spec = importlib.util.spec_from_file_location("spring2026_impl", _spring_impl_path)
+_impl_mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_impl_mod)
+mmlu_baseline = _impl_mod.mmlu_baseline
+gsm8k_baseline = _impl_mod.gsm8k_baseline
+iterate_batches = _impl_mod.iterate_batches
 from cs336_alignment.data_loading import SFTDataLoading
 from cs336_alignment.sft_helper import tokenize_prompt_and_output, compute_entropy, get_response_log_probs, masked_normalize, sft_microbatch_train_step
 

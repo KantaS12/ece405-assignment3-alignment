@@ -27,8 +27,8 @@ class SFTDataLoading:
         all_tokens = []
         for item in raw_data:
             # Support Alpaca-style keys and GSM8K-style keys
-            prompt = item.get('prompt') or item.get('instruction') or item.get('question', '')
-            response = item.get('response') or item.get('output') or item.get('answer', '')
+            prompt = item.get('prompt') or item.get('instruction') or item.get('question') or item.get('problem', '')
+            response = item.get('response') or item.get('output') or item.get('answer') or item.get('solution', '')
             text_string = (
                 "Below is an instruction that describes a task. "
                 "Write a response that appropriately completes the request.\n\n"

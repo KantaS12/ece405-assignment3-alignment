@@ -56,19 +56,33 @@ def load_policy_into_vllm_instance(policy, llm):
     llm_model.load_weights(state_dict.items())
 
 
+def _get_question(item: dict) -> str:
+    return item.get('problem') or item.get('question', '')
+
+
+def _get_answer(item: dict) -> str:
+    return item.get('answer') or item.get('solution', '')
+
+
 def extract_answer(text: str) -> str | None:
+    # GSM8K style
     matches = re.findall(r'####\s*([^\n]+)', text)
     if matches:
         return matches[-1].strip().replace(',', '')
+    # MATH / boxed style
+    import re as _re
+    m = _re.search(r'\\boxed\{([^}]*)\}', text)
+    if m:
+        return m.group(1).strip()
     return None
 
 
 def compute_val_accuracy(llm, val_items, n=VAL_ACC_SAMPLES):
-    prompts = [INFERENCE_PROMPT.format(question=item['question']) for item in val_items[:n]]
+    prompts = [INFERENCE_PROMPT.format(question=_get_question(item)) for item in val_items[:n]]
     params = SamplingParams(temperature=0, max_tokens=MAX_NEW_TOKENS)
     outputs = llm.generate(prompts, params)
     correct = sum(
-        extract_answer(o.outputs[0].text) == extract_answer(item['answer'])
+        extract_answer(o.outputs[0].text) == extract_answer(_get_answer(item))
         for o, item in zip(outputs, val_items[:n])
     )
     acc = correct / len(prompts) if prompts else 0.0
@@ -232,7 +246,7 @@ def main():
 
     model_tag  = os.path.basename(args.model_path.rstrip('/'))
     n_tag      = f"n{num_examples}" if num_examples else "full"
-    run_name   = f"{model_tag}_gsm8k_{n_tag}_lr{args.lr:.0e}_bs{args.batch_size*args.grad_accum}_ep{args.epochs}"
+    run_name   = f"{model_tag}_math_{n_tag}_lr{args.lr:.0e}_bs{args.batch_size*args.grad_accum}_ep{args.epochs}"
     output_dir = args.output_dir or os.path.abspath(os.path.join(SCRIPT_DIR, f'../models/{run_name}'))
 
     print("=" * 65)

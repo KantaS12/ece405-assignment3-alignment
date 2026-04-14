@@ -32,11 +32,20 @@ STOP_STR = "</answer>"
 def build_prompt(question: str) -> str:
     return _R1_TEMPLATE.format(question=question)
 
-# GSM8K answers have the format "#### <answer>", so we can extract the answer for grading.
-def extract_gsm8k_gt(answer_str: str) -> str:
-    """Pull the number after #### from a GSM8K answer string."""
+# GSM8K answers have "#### <answer>"; MATH answers use \boxed{}.
+def extract_gt(answer_str: str) -> str:
+    """Extract the ground-truth answer from either GSM8K or MATH format."""
     m = re.findall(r"####\s*([^\n]+)", answer_str)
-    return m[-1].strip().replace(",", "") if m else answer_str.strip()
+    if m:
+        return m[-1].strip().replace(",", "")
+    return answer_str.strip()
+
+
+def _get_field(item: dict, *keys: str) -> str:
+    for k in keys:
+        if k in item:
+            return item[k]
+    raise KeyError(f"None of {keys} found in item")
 
 # Reward function
 def reward(response: str, gt: str) -> float:
@@ -167,7 +176,7 @@ def sft_step(model, tokenizer, correct_pairs, lr, epochs, device):
 # Evaluation Helper
 
 def compute_val_accuracy(llm, val_items, n=VAL_SAMPLES):
-    prompts = [build_prompt(it["question"]) for it in val_items[:n]]
+    prompts = [build_prompt(_get_field(it, "problem", "question")) for it in val_items[:n]]
     params  = SamplingParams(
         temperature=0, max_tokens=MAX_NEW_TOKENS, stop=[STOP_STR]
     )
@@ -176,7 +185,7 @@ def compute_val_accuracy(llm, val_items, n=VAL_SAMPLES):
     for out, item in zip(outputs, val_items[:n]):
         # vLLM strips the stop string; re-append so the grader sees </answer>
         resp = out.outputs[0].text + STOP_STR
-        gt   = extract_gsm8k_gt(item["answer"])
+        gt   = extract_gt(_get_field(item, "answer", "solution"))
         correct += int(reward(resp, gt) == 1.0)
     acc = correct / len(prompts)
     print(f"  Val accuracy: {correct}/{len(prompts)} = {acc:.2%}")
@@ -267,7 +276,7 @@ def run_expert_iteration(
         load_policy_into_vllm(model, llm)
 
         # Generate G rollouts per question
-        prompts = [build_prompt(q["question"]) for q in batch]
+        prompts = [build_prompt(_get_field(q, "problem", "question")) for q in batch]
         params  = SamplingParams(
             temperature=1.0, max_tokens=MAX_NEW_TOKENS,
             n=G, stop=[STOP_STR], seed=seed + step,
@@ -278,8 +287,8 @@ def run_expert_iteration(
         correct_pairs = []
         n_rollouts    = 0
         for q_item, out in zip(batch, outputs):
-            gt     = extract_gsm8k_gt(q_item["answer"])
-            prompt = build_prompt(q_item["question"])
+            gt     = extract_gt(_get_field(q_item, "answer", "solution"))
+            prompt = build_prompt(_get_field(q_item, "problem", "question"))
             for gen in out.outputs:
                 n_rollouts += 1
                 resp = gen.text + STOP_STR   # restore stop string for grader
