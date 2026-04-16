@@ -56,7 +56,7 @@ def reward(response: str, gt: str) -> float:
 # vLLM helpers
 
 def init_vllm(model_path: str, device: str, seed: int,
-              gpu_memory_utilization: float = 0.85) -> LLM:
+              gpu_memory_utilization: float = 0.70) -> LLM:
     vllm_set_random_seed(seed)
     world_patch = patch("torch.distributed.get_world_size", return_value=1)
     prof_patch  = patch(
@@ -68,7 +68,7 @@ def init_vllm(model_path: str, device: str, seed: int,
             model=model_path, device=device, dtype=torch.bfloat16,
             enable_prefix_caching=True,
             gpu_memory_utilization=gpu_memory_utilization,
-            max_model_len=512,
+            max_model_len=2048,
         )
 
 
@@ -203,7 +203,7 @@ def compute_entropy(model, tokenizer, val_items, device, n=64):
     with torch.no_grad():
         for item in val_items[:n]:
             ids = tokenizer(
-                build_prompt(item["question"]),
+                build_prompt(_get_field(item, "problem", "question")),
                 return_tensors="pt", truncation=True, max_length=SEQ_LENGTH,
             ).input_ids.to(device)
             logits = model(ids).logits[0]          # (T, V)

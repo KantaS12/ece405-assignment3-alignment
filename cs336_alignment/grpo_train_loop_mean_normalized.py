@@ -15,7 +15,7 @@ from vllm.model_executor import set_random_seed as vllm_set_random_seed
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from drgrpo_grader import r1_zero_reward_fn
-from grpo_implementation import compute_group_normalized_rewards, grpo_microbatch_train_step_mean_normalized
+from grpo_implementation import compute_group_normalized_rewards, grpo_microbatch_train_step
 from sft_helper import tokenize_prompt_and_output
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -420,7 +420,7 @@ def main(
                 if loss_type == "grpo_clip":
                     old_lp = old_log_probs_per_mb[mb_idx].to(policy_device)
 
-                loss, meta = grpo_microbatch_train_step_mean_normalized(
+                loss, meta = grpo_microbatch_train_step(
                     policy_log_probs=policy_log_probs,
                     response_mask=response_mask,
                     gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,

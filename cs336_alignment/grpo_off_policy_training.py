@@ -3,6 +3,7 @@ import os
 import sys
 import json
 import random
+import time
 from typing import Literal
 
 import torch
@@ -20,7 +21,7 @@ from sft_helper import tokenize_prompt_and_output
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Hyperparameters
+# Fixed hyperparameters
 N_GRPO_STEPS: int = 200
 LEARNING_RATE: float = 1e-5
 ADVANTAGE_EPS: float = 1e-6
@@ -29,27 +30,19 @@ GROUP_SIZE: int = 8
 SAMPLING_TEMPERATURE: float = 1.0
 SAMPLING_MIN_TOKENS: int = 4
 SAMPLING_MAX_TOKENS: int = 512
-EPOCHS_PER_ROLLOUT_BATCH: int = 1
-TRAIN_BATCH_SIZE: int = 256
-GRADIENT_ACCUMULATION_STEPS: int = 128
 GPU_MEMORY_UTILIZATION: float = 0.70
 GRAD_CLIP: float = 1.0
 CLIPRANGE: float = 0.2
 VAL_SIZE: int = 1024
 VAL_EVERY: int = 5
-
-LOSS_TYPE: Literal["no_baseline", "reinforce_with_baseline", "grpo_clip"] = "reinforce_with_baseline"
+LOSS_TYPE: str = "grpo_clip"
 USE_STD_NORMALIZATION: bool = True
 
-# Derived constants (validated at import time)
-assert TRAIN_BATCH_SIZE % GRADIENT_ACCUMULATION_STEPS == 0
-MICRO_TRAIN_BATCH_SIZE = TRAIN_BATCH_SIZE // GRADIENT_ACCUMULATION_STEPS
-assert ROLLOUT_BATCH_SIZE % MICRO_TRAIN_BATCH_SIZE == 0
-assert TRAIN_BATCH_SIZE >= GROUP_SIZE
-assert ROLLOUT_BATCH_SIZE % GROUP_SIZE == 0
+# Memory budget: keep microbatch size fixed at 2 so GPU memory stays constant
+# regardless of train_batch_size. GRADIENT_ACCUMULATION_STEPS is derived at runtime.
+MICRO_TRAIN_BATCH_SIZE: int = 2
+
 N_PROMPTS_PER_ROLLOUT = ROLLOUT_BATCH_SIZE // GROUP_SIZE
-N_MICROBATCHES = ROLLOUT_BATCH_SIZE // MICRO_TRAIN_BATCH_SIZE
-assert N_MICROBATCHES == GRADIENT_ACCUMULATION_STEPS
 
 # Prompt template
 with open(os.path.join(SCRIPT_DIR, "prompts/r1_zero.prompt")) as _f:
@@ -104,7 +97,7 @@ def compute_policy_log_probs(
 ) -> torch.Tensor:
     """Return per-token log-probs (B, T) under current policy."""
     outputs = policy(input_ids=input_ids)
-    logits = outputs.logits  # (B, T, V)
+    logits = outputs.logits
     log_probs = F.log_softmax(logits, dim=-1)
     return log_probs.gather(-1, labels.unsqueeze(-1)).squeeze(-1)
 
@@ -115,29 +108,23 @@ def compute_policy_log_probs_and_entropy(
     labels: torch.Tensor,
     response_mask: torch.Tensor,
 ) -> tuple[torch.Tensor, float]:
-    """
-    Single forward pass returning per-token log-probs (B, T) and mean
-    per-token entropy (scalar float) averaged over response tokens.
-    """
     outputs = policy(input_ids=input_ids)
-    logits = outputs.logits  # (B, T, V)
+    logits = outputs.logits
 
-    # Compute entropy first under no_grad so we can free probs immediately
     with torch.no_grad():
         log_probs_d = F.log_softmax(logits.detach(), dim=-1)
         probs_d = log_probs_d.exp()
-        token_entropy = -(probs_d * log_probs_d).sum(dim=-1)  # (B, T)
+        token_entropy = -(probs_d * log_probs_d).sum(dim=-1)
         del probs_d, log_probs_d
         mask_f = response_mask.float()
         mean_entropy = (token_entropy * mask_f).sum() / mask_f.sum().clamp(min=1)
         mean_entropy = mean_entropy.item()
         del token_entropy, mask_f
 
-    # Compute log_probs for gradient; delete logits to free (B,T,V) from Python scope
     log_probs = F.log_softmax(logits, dim=-1)
     del logits
-    token_lp = log_probs.gather(-1, labels.unsqueeze(-1)).squeeze(-1)  # (B, T)
-    del log_probs  # autograd still holds ref until backward; Python ref freed
+    token_lp = log_probs.gather(-1, labels.unsqueeze(-1)).squeeze(-1)
+    del log_probs
 
     return token_lp, mean_entropy
 
@@ -150,10 +137,6 @@ def sample_and_generate_rollout_batch(
     train_items: list[dict],
     seed_offset: int,
 ) -> tuple[list[dict], dict]:
-    """
-    Sample N_PROMPTS_PER_ROLLOUT questions, generate GROUP_SIZE completions each,
-    compute group-normalised advantages, and return per-item rollout dicts.
-    """
     batch_items = random.sample(train_items, N_PROMPTS_PER_ROLLOUT)
     prompts = [build_prompt(_get_field(it, "problem", "question")) for it in batch_items]
     ground_truths = [_get_field(it, "answer", "solution") for it in batch_items]
@@ -180,8 +163,6 @@ def sample_and_generate_rollout_batch(
             rollout_responses.append(gen.text + STOP_STR)
             rollout_gts.append(gt)
 
-    # compute_group_normalized_rewards calls reward_fn once per response and
-    # now returns mean_format_reward / mean_answer_reward in its metadata.
     advantages, raw_rewards, reward_metadata = compute_group_normalized_rewards(
         reward_fn=r1_zero_reward_fn,
         rollout_reponses=rollout_responses,
@@ -212,10 +193,6 @@ def evaluate_validation(
     val_items: list[dict],
     seed: int,
 ) -> dict:
-    """
-    Greedy decode on val_items, score with r1_zero_reward_fn.
-    Returns reward stats and a few example rollouts.
-    """
     load_policy_into_vllm(policy, llm)
 
     prompts = [build_prompt(_get_field(it, "problem", "question")) for it in val_items]
@@ -275,17 +252,29 @@ def main(
     save_every: int = typer.Option(10, help="Checkpoint every N GRPO steps"),
     val_every: int = typer.Option(VAL_EVERY, help="Validate every N GRPO steps"),
     n_grpo_steps: int = typer.Option(N_GRPO_STEPS, help="Total GRPO steps"),
-    loss_type: str = typer.Option(LOSS_TYPE, help="no_baseline | reinforce_with_baseline | grpo_clip"),
     lr: float = typer.Option(LEARNING_RATE, help="AdamW learning rate"),
+    epochs_per_rollout_batch: int = typer.Option(1, help="Gradient epochs over each rollout batch (>1 = off-policy)"),
+    train_batch_size: int = typer.Option(256, help="Tokens per optimizer step. Must divide ROLLOUT_BATCH_SIZE=256. "
+                                                    "GRADIENT_ACCUMULATION_STEPS auto-derived to keep microbatch=2."),
 ):
+    assert ROLLOUT_BATCH_SIZE % train_batch_size == 0, \
+        f"train_batch_size={train_batch_size} must divide ROLLOUT_BATCH_SIZE={ROLLOUT_BATCH_SIZE}"
+    assert train_batch_size % MICRO_TRAIN_BATCH_SIZE == 0, \
+        f"train_batch_size={train_batch_size} must be divisible by MICRO_TRAIN_BATCH_SIZE={MICRO_TRAIN_BATCH_SIZE}"
+
+    gradient_accumulation_steps = train_batch_size // MICRO_TRAIN_BATCH_SIZE
+    n_train_batches_per_rollout = ROLLOUT_BATCH_SIZE // train_batch_size
+    # Total microbatches covering the full rollout (for old_log_probs)
+    n_microbatches_total = ROLLOUT_BATCH_SIZE // MICRO_TRAIN_BATCH_SIZE
+
     random.seed(seed)
     torch.manual_seed(seed)
 
-    # Resolve paths
     data_path = data_path or os.path.join(SCRIPT_DIR, "../data/math/train.jsonl")
     model_tag = os.path.basename(model_path.rstrip("/"))
     output_dir = output_dir or os.path.join(
-        SCRIPT_DIR, f"../models/{model_tag}_grpo_{loss_type}_lr{lr:.0e}"
+        SCRIPT_DIR,
+        f"../models/{model_tag}_grpo_clip_ep{epochs_per_rollout_batch}_tb{train_batch_size}_lr{lr:.0e}"
     )
     os.makedirs(output_dir, exist_ok=True)
 
@@ -305,7 +294,6 @@ def main(
         val_items = val_items[:VAL_SIZE]
         train_items = all_items
     else:
-        # Deterministic split: first VAL_SIZE as validation holdout
         rng = random.Random(seed)
         idx = list(range(len(all_items)))
         rng.shuffle(idx)
@@ -313,10 +301,11 @@ def main(
         train_items = [all_items[i] for i in idx[VAL_SIZE:]]
 
     print(f"Train: {len(train_items)}  Val: {len(val_items)}")
-    print(f"loss_type={loss_type}  n_grpo_steps={n_grpo_steps}  "
+    print(f"loss_type=grpo_clip  epochs_per_rollout={epochs_per_rollout_batch}  "
+          f"train_batch_size={train_batch_size}  grad_accum={gradient_accumulation_steps}  "
+          f"n_train_batches_per_rollout={n_train_batches_per_rollout}  "
           f"rollout_batch={ROLLOUT_BATCH_SIZE}  group_size={GROUP_SIZE}")
 
-    # Model
     print(f"Loading policy from {model_path} …")
     policy = AutoModelForCausalLM.from_pretrained(
         model_path, trust_remote_code=True, torch_dtype=torch.bfloat16
@@ -336,10 +325,12 @@ def main(
 
     train_log: list[dict] = []
     val_log: list[dict] = []
+    t_start = time.time()
 
     for grpo_step in range(n_grpo_steps):
+        t_step_start = time.time()
         sep = "=" * 60
-        print(f"\n{sep}\nGRPO Step {grpo_step + 1}/{n_grpo_steps}  loss={loss_type}\n{sep}")
+        print(f"\n{sep}\nGRPO Step {grpo_step + 1}/{n_grpo_steps}  grpo_clip\n{sep}")
 
         # Rollout
         policy.eval()
@@ -353,45 +344,11 @@ def main(
               f"format={reward_meta['mean_format_reward']:.4f}  "
               f"answer={reward_meta['mean_answer_reward']:.4f}")
 
-        # Old log-probs for clipping, if needed
-        old_log_probs_per_mb: list[torch.Tensor] | None = None
-        if loss_type == "grpo_clip":
-            old_log_probs_per_mb = []
-            policy.eval()
-            with torch.no_grad():
-                for mb_idx in range(N_MICROBATCHES):
-                    mb = rollout_batch[mb_idx * MICRO_TRAIN_BATCH_SIZE:
-                                       (mb_idx + 1) * MICRO_TRAIN_BATCH_SIZE]
-                    tokens = tokenize_prompt_and_output(
-                        [it["prompt"] for it in mb],
-                        [it["response"] for it in mb],
-                        tokenizer,
-                    )
-                    old_lp = compute_policy_log_probs(
-                        policy,
-                        tokens["input_ids"].to(policy_device),
-                        tokens["labels"].to(policy_device),
-                    )
-                    old_log_probs_per_mb.append(old_lp.cpu())
-
-        # Training
-        policy.train()
-        step_log = {
-            "grpo_step": grpo_step + 1,
-            "lr": lr,
-            "train_mean_reward": reward_meta["mean_reward"],
-            "train_mean_format_reward": reward_meta["mean_format_reward"],
-            "train_mean_answer_reward": reward_meta["mean_answer_reward"],
-        }
-
-        # One optimizer step per rollout batch (EPOCHS_PER_ROLLOUT_BATCH may be > 1 for off-policy)
-        for epoch in range(EPOCHS_PER_ROLLOUT_BATCH):
-            optimizer.zero_grad()
-            epoch_loss = 0.0
-            epoch_entropy = 0.0
-            epoch_clip_frac = 0.0
-
-            for mb_idx in range(N_MICROBATCHES):
+        # Compute old_log_probs for the full rollout batch before any gradient steps
+        old_log_probs_all: list[torch.Tensor] = []
+        policy.eval()
+        with torch.inference_mode():
+            for mb_idx in range(n_microbatches_total):
                 mb = rollout_batch[mb_idx * MICRO_TRAIN_BATCH_SIZE:
                                    (mb_idx + 1) * MICRO_TRAIN_BATCH_SIZE]
                 tokens = tokenize_prompt_and_output(
@@ -399,55 +356,102 @@ def main(
                     [it["response"] for it in mb],
                     tokenizer,
                 )
-                input_ids = tokens["input_ids"].to(policy_device)
-                labels = tokens["labels"].to(policy_device)
-                response_mask = tokens["response_mask"].float().to(policy_device)
-
-                mb_advantages = torch.tensor(
-                    [it["advantage"] for it in mb], dtype=torch.float32
-                ).unsqueeze(-1).to(policy_device)
-                mb_raw_rewards = torch.tensor(
-                    [it["raw_reward"] for it in mb], dtype=torch.float32
-                ).unsqueeze(-1).to(policy_device)
-
-                # Forward pass — also compute token entropy for logging
-                policy_log_probs, mb_entropy = compute_policy_log_probs_and_entropy(
-                    policy, input_ids, labels, response_mask
+                old_lp = compute_policy_log_probs(
+                    policy,
+                    tokens["input_ids"].to(policy_device),
+                    tokens["labels"].to(policy_device),
                 )
-                epoch_entropy += mb_entropy / N_MICROBATCHES
+                old_log_probs_all.append(old_lp.cpu())
 
-                old_lp = None
-                if loss_type == "grpo_clip":
-                    old_lp = old_log_probs_per_mb[mb_idx].to(policy_device)
+        # Training: multiple epochs over the rollout batch
+        policy.train()
+        step_log = {
+            "grpo_step": grpo_step + 1,
+            "lr": lr,
+            "train_mean_reward": reward_meta["mean_reward"],
+            "train_mean_format_reward": reward_meta["mean_format_reward"],
+            "train_mean_answer_reward": reward_meta["mean_answer_reward"],
+            "wall_clock_s": time.time() - t_start,
+        }
 
-                loss, meta = grpo_microbatch_train_step_mean_normalized(
-                    policy_log_probs=policy_log_probs,
-                    response_mask=response_mask,
-                    gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,
-                    loss_type=loss_type,
-                    raw_rewards=mb_raw_rewards if loss_type == "no_baseline" else None,
-                    advantages=mb_advantages if loss_type != "no_baseline" else None,
-                    old_log_probs=old_lp,
-                    cliprange=CLIPRANGE if loss_type == "grpo_clip" else None,
-                )
-                epoch_loss += loss.item()
-                if loss_type == "grpo_clip" and "percent_clipped" in meta:
-                    epoch_clip_frac += meta["percent_clipped"] / N_MICROBATCHES
+        last_loss = 0.0
+        last_grad_norm = 0.0
+        last_entropy = 0.0
+        last_clip_frac = 0.0
 
-            # Gradient clipping — returns the pre-clip global norm
-            grad_norm = torch.nn.utils.clip_grad_norm_(policy.parameters(), GRAD_CLIP)
-            optimizer.step()
-            torch.cuda.empty_cache()
+        for epoch in range(epochs_per_rollout_batch):
+            epoch_entropy_total = 0.0
+            epoch_clip_frac_total = 0.0
+            n_optimizer_steps = 0
 
-            clip_str = f"  clip_frac={epoch_clip_frac:.4f}" if loss_type == "grpo_clip" else ""
-            print(f"  epoch {epoch + 1}  loss={epoch_loss:.6f}  "
-                  f"grad_norm={grad_norm:.4f}  entropy={epoch_entropy:.4f}{clip_str}")
+            for tb_idx in range(n_train_batches_per_rollout):
+                optimizer.zero_grad()
+                batch_loss = 0.0
+                batch_entropy = 0.0
+                batch_clip_frac = 0.0
 
-        step_log["loss"] = epoch_loss
-        step_log["grad_norm"] = float(grad_norm)
-        step_log["token_entropy"] = epoch_entropy
-        if loss_type == "grpo_clip":
-            step_log["clip_fraction"] = epoch_clip_frac
+                for local_mb_idx in range(gradient_accumulation_steps):
+                    # Global microbatch index into the rollout batch
+                    global_mb_idx = tb_idx * gradient_accumulation_steps + local_mb_idx
+                    mb = rollout_batch[global_mb_idx * MICRO_TRAIN_BATCH_SIZE:
+                                       (global_mb_idx + 1) * MICRO_TRAIN_BATCH_SIZE]
+                    tokens = tokenize_prompt_and_output(
+                        [it["prompt"] for it in mb],
+                        [it["response"] for it in mb],
+                        tokenizer,
+                    )
+                    input_ids = tokens["input_ids"].to(policy_device)
+                    labels = tokens["labels"].to(policy_device)
+                    response_mask = tokens["response_mask"].float().to(policy_device)
+
+                    mb_advantages = torch.tensor(
+                        [it["advantage"] for it in mb], dtype=torch.float32
+                    ).unsqueeze(-1).to(policy_device)
+
+                    policy_log_probs, mb_entropy = compute_policy_log_probs_and_entropy(
+                        policy, input_ids, labels, response_mask
+                    )
+                    batch_entropy += mb_entropy / gradient_accumulation_steps
+
+                    old_lp = old_log_probs_all[global_mb_idx].to(policy_device)
+
+                    loss, meta = grpo_microbatch_train_step_mean_normalized(
+                        policy_log_probs=policy_log_probs,
+                        response_mask=response_mask,
+                        gradient_accumulation_steps=gradient_accumulation_steps,
+                        loss_type="grpo_clip",
+                        raw_rewards=None,
+                        advantages=mb_advantages,
+                        old_log_probs=old_lp,
+                        cliprange=CLIPRANGE,
+                    )
+                    batch_loss += loss.item()
+                    if "percent_clipped" in meta:
+                        batch_clip_frac += meta["percent_clipped"] / gradient_accumulation_steps
+
+                grad_norm = torch.nn.utils.clip_grad_norm_(policy.parameters(), GRAD_CLIP)
+                optimizer.step()
+                torch.cuda.empty_cache()
+
+                epoch_entropy_total += batch_entropy
+                epoch_clip_frac_total += batch_clip_frac
+                n_optimizer_steps += 1
+                last_loss = batch_loss
+                last_grad_norm = float(grad_norm)
+
+            avg_entropy = epoch_entropy_total / n_train_batches_per_rollout
+            avg_clip = epoch_clip_frac_total / n_train_batches_per_rollout
+            last_entropy = avg_entropy
+            last_clip_frac = avg_clip
+            print(f"  epoch {epoch + 1}  loss={last_loss:.6f}  "
+                  f"grad_norm={last_grad_norm:.4f}  entropy={avg_entropy:.4f}  "
+                  f"clip_frac={avg_clip:.4f}  opt_steps={n_optimizer_steps}")
+
+        step_log["loss"] = last_loss
+        step_log["grad_norm"] = last_grad_norm
+        step_log["token_entropy"] = last_entropy
+        step_log["clip_fraction"] = last_clip_frac
+        step_log["step_wall_clock_s"] = time.time() - t_step_start
 
         # Validation
         if (grpo_step + 1) % val_every == 0:
@@ -461,6 +465,7 @@ def main(
             })
             val_entry = {
                 "grpo_step": grpo_step + 1,
+                "wall_clock_s": time.time() - t_start,
                 "val_mean_reward": val_result["val_mean_reward"],
                 "val_mean_format_reward": val_result["val_mean_format_reward"],
                 "val_mean_answer_reward": val_result["val_mean_answer_reward"],
@@ -472,8 +477,7 @@ def main(
                   f"format={val_result['val_mean_format_reward']:.4f}  "
                   f"answer={val_result['val_mean_answer_reward']:.4f}")
             for ex in val_result["val_examples"][:3]:
-                print(f"    reward={ex['reward']}  "
-                      f"response={ex['response'][:200]!r}")
+                print(f"    reward={ex['reward']}  response={ex['response'][:200]!r}")
 
         train_log.append(step_log)
 

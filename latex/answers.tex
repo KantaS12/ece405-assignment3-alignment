@@ -1,0 +1,209 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\geometry{letterpaper, margin=1in}
+\usepackage{hyperref}
+\usepackage{amsmath}
+
+\title{CS336 Assignment 5: Alignment and Reasoning RL}
+\author{Kanta Saito}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section*{Problem (math\_baseline): 4 points} % [cite: 145]
+(a) Write a script to evaluate Qwen 2.5 Math 1.5B zero-shot performance on MATH. % [cite: 146]
+\newline
+(b) Run your evaluation script on Qwen 2.5 Math 1.5B. How many model generations fall into each of the following categories: (1) correct with both format and answer reward 1, (2) format reward 1 and answer reward 0, (3) format reward 0 and answer reward 0? Observing at least 10 cases where format reward is 0, do you think the issue is with the base model's output, or the parser? Why? What about in (at least 10) cases where format reward is 1 but answer reward is 0? % [cite: 159, 160, 161, 162]
+\newline
+(c) How well does the Qwen 2.5 Math 1.5B zero-shot baseline perform on MATH? % [cite: 164]
+
+\textbf{Answer:}
+% Write your answer here
+
+
+\section*{Problem (tokenize\_prompt\_and\_output): Prompt and output tokenization (2 points)} % [cite: 247]
+Deliverable: Implement a method \texttt{tokenize\_prompt\_and\_output} that tokenizes the question and output separately, concatenates them together, and constructs a \texttt{response\_mask}. % [cite: 248]
+
+\textbf{Answer:}
+% Write your answer or insert your code snippet here
+
+
+\section*{Problem (compute\_entropy): Per-token entropy (1 point)} % [cite: 269]
+Deliverable: Implement a method \texttt{compute\_entropy} that computes the per-token entropy of next-token predictions. % [cite: 270]
+
+\textbf{Answer:}
+% Write your answer or insert your code snippet here
+
+
+\section*{Problem (get\_response\_log\_probs): Response log-probs (and entropy) (2 points)} % [cite: 286]
+Deliverable: Implement a method \texttt{get\_response\_log\_probs} that gets per-token conditional log-probabilities (given the previous tokens) from a causal language model, and optionally the entropy of the model's next-token distribution. % [cite: 287]
+
+\textbf{Answer:}
+% Write your answer or insert your code snippet here
+
+
+\section*{Problem (masked\_normalize): Masked normalize (1 point)} % [cite: 309]
+Deliverable: Implement a method \texttt{masked\_normalize} that sums over tensor elements and normalizes by a constant while respecting a boolean mask. % [cite: 310]
+
+\textbf{Answer:}
+% Write your answer or insert your code snippet here
+
+
+\section*{Problem (sft\_microbatch\_train\_step): Microbatch train step (3 points)} % [cite: 326]
+Deliverable: Implement a single micro-batch update for SFT, including cross-entropy loss, summing with a mask, and gradient scaling. % [cite: 327]
+
+\textbf{Answer:}
+% Write your answer or insert your code snippet here
+
+
+\section*{Problem (log\_generations): Logging generations (1 point)} % [cite: 357]
+Deliverable: Implement a function \texttt{log\_generations} that can be used to log generations from your model. % [cite: 358]
+
+\textbf{Answer:}
+% Write your answer or insert your code snippet here
+
+
+\section*{Problem (sft\_experiment): Run SFT on the MATH dataset (2 points)} % [cite: 407]
+1. Run SFT on the reasoning SFT examples using the Qwen 2.5 Math 1.5B base model, varying the number of unique examples for SFT in the range \{128, 256, 512, 1024\}, along with using the full dataset. Tune the learning rate and batch size to achieve at least 15\% validation accuracy when using the full dataset. Deliverable: Validation accuracy curves associated with different dataset sizes. % [cite: 408, 410, 411, 412]
+\newline
+2. Filter the reasoning SFT examples to only include examples that produce the correct answer. Run SFT on the (full) filtered dataset and report the size of the filtered dataset and the validation accuracy you achieve. Deliverable: Report the size of the dataset and the validation accuracy curve you achieve. Compare your findings to the previous SFT experiment. % [cite: 413, 414, 415, 416]
+
+\textbf{Answer:}
+% Write your answer and include your plots here
+
+
+\section*{Problem (expert\_iteration\_experiment): Run expert iteration on the MATH dataset (2 points)} % [cite: 450]
+Run expert iteration on the MATH dataset using the Qwen 2.5 Math 1.5B Base model. Vary the batch size for each expert iteration step in \{512, 1024, 2048\}. % [cite: 451, 453]
+Deliverables: 
+- Validation accuracy curves associated with different rollout configurations. Try at least 2 different rollout counts and epoch counts. % [cite: 456]
+- A model that achieves validation accuracy of at least 15\% on MATH. % [cite: 457]
+- A brief 2 sentence discussion comparing to your SFT performance, as well as performance across EI steps. % [cite: 458]
+- A plot of the entropy of the model's responses over training. % [cite: 459]
+
+\textbf{Answer:}
+% Write your answer and include your plots here
+
+
+\section*{Problem (compute\_group\_normalized\_rewards): Group normalization (2 points)} % [cite: 642]
+Deliverable: Implement a method \texttt{compute\_group\_normalized\_rewards} that calculates raw rewards for each rollout response, normalizes them within their groups, and returns both the normalized and raw rewards along with any metadata you think is useful. % [cite: 643]
+
+\textbf{Answer:}
+% Write your answer or insert your code snippet here
+
+
+\section*{Problem (compute\_naive\_policy\_gradient\_loss): Naive policy gradient (1 point)} % [cite: 677]
+Deliverable: Implement a method \texttt{compute\_naive\_policy\_gradient\_loss} that computes the per-token policy-gradient loss using raw rewards or pre-computed advantages. % [cite: 678]
+
+\textbf{Answer:}
+% Write your answer or insert your code snippet here
+
+
+\section*{Problem (compute\_grpo\_clip\_loss): GRPO-Clip loss (2 points)} % [cite: 699]
+Deliverable: Implement a method \texttt{compute\_grpo\_clip\_loss} that computes the per-token GRPO-Clip loss. % [cite: 700]
+
+\textbf{Answer:}
+% Write your answer or insert your code snippet here
+
+
+\section*{Problem (compute\_policy\_gradient\_loss): Policy-gradient wrapper (1 point)} % [cite: 728]
+Deliverable: Implement \texttt{compute\_policy\_gradient\_loss}, a convenience wrapper that dispatches to the correct loss routine (\texttt{no\_baseline}, \texttt{reinforce\_with\_baseline}, or \texttt{grpo\_clip}) and returns both the per-token loss and any auxiliary statistics. % [cite: 729]
+
+\textbf{Answer:}
+% Write your answer or insert your code snippet here
+
+
+\section*{Problem (masked\_mean): Masked mean (1 point)} % [cite: 767]
+Deliverable: Implement a method \texttt{masked\_mean} that averages tensor elements while respecting a boolean mask. % [cite: 768]
+
+\textbf{Answer:}
+% Write your answer or insert your code snippet here
+
+
+\section*{Problem (grpo\_microbatch\_train\_step): Microbatch train step (3 points)} % [cite: 787]
+Deliverable: Implement a single micro-batch update for GRPO, including policy-gradient loss, averaging with a mask, and gradient scaling. % [cite: 788]
+
+\textbf{Answer:}
+% Write your answer or insert your code snippet here
+
+
+\section*{Problem (grpo\_train\_loop): GRPO train loop (5 points)} % [cite: 880]
+Deliverable: Implement a complete train loop for GRPO. Begin training a policy on MATH and confirm that you see validation rewards improving, along with sensible rollouts over time. Provide a plot with the validation rewards with respect to steps, and a few example rollouts over time. % [cite: 881, 882]
+
+\textbf{Answer:}
+% Write your answer and include your plots here
+
+
+\section*{Problem (grpo\_learning\_rate): Tune the learning rate (2 points)} % [cite: 888]
+Starting with the suggested hyperparameters above, perform a sweep over the learning rates and report the final validation answer rewards. % [cite: 889]
+Deliverables: 
+- Validation reward curves associated with multiple learning rates. % [cite: 890]
+- A model that achieves validation accuracy of at least 25\% on MATH. % [cite: 890]
+- A brief 2 sentence discussion on any other trends you notice on other logged metrics. % [cite: 891]
+
+\textbf{Answer:}
+% Write your answer and include your plots here
+
+
+\section*{Problem (grpo\_baselines): Effect of baselining (2 points)} % [cite: 898]
+Train a policy with \texttt{reinforce\_with\_baseline} and with \texttt{no\_baseline}. % [cite: 899]
+Deliverables: 
+- Validation reward curves associated with each loss type. % [cite: 899]
+- A brief 2 sentence discussion on any other trends you notice on other logged metrics. % [cite: 900]
+
+\textbf{Answer:}
+% Write your answer and include your plots here
+
+
+\section*{Problem (think\_about\_length\_normalization): Think about length normalization (1 point)} % [cite: 956]
+Deliverable: Compare the two approaches (without running experiments yet). What are the pros and cons of each approach? Are there any specific settings or examples where one approach seems better? % [cite: 957, 958]
+
+\textbf{Answer:}
+% Write your answer here
+
+
+\section*{Problem (grpo\_length\_normalization): Effect of length normalization (2 points)} % [cite: 960]
+Deliverable: Compare normalization with \texttt{masked\_mean} and \texttt{masked\_normalize} with an end-to-end GRPO training run. Report the validation answer reward curves. Comment on the findings, including any other metrics that have a noticeable trend. % [cite: 961, 962]
+
+\textbf{Answer:}
+% Write your answer and include your plots here
+
+
+\section*{Problem (grpo\_group\_standard\_deviation): Effect of standard deviation normalization (2 points)} % [cite: 968]
+Deliverable: Compare the performance of \texttt{use\_std\_normalization = True} and \texttt{use\_std\_normalization = False}. Report the validation answer reward curves. Comment on the findings, including any other metrics that have a noticeable trend. % [cite: 969, 970]
+
+\textbf{Answer:}
+% Write your answer and include your plots here
+
+
+\section*{Problem (grpo\_off\_policy): Implement off-policy GRPO} % [cite: 980]
+Deliverable: Implement off-policy GRPO training. % [cite: 981]
+
+\textbf{Answer:}
+% Write your answer or insert your code snippet here
+
+
+\section*{Problem (grpo\_off\_policy\_sweep): Off-policy GRPO hyperparameter sweep (4 points)} % [cite: 989]
+Deliverable: Fixing \texttt{rollout\_batch\_size = 256}, choose a range over \texttt{epochs\_per\_rollout\_batch} and \texttt{train\_batch\_size} to sweep over. First do a broad sweep for a limited number of GRPO steps (<50) to get a sense of the performance landscape, and then a more focused sweep for a larger number of GRPO steps (200). Provide a brief experiment log explaining the ranges you chose. Compare to your on-policy run with \texttt{epochs\_per\_rollout\_batch = 1} and \texttt{train\_batch\_size = 256}, reporting plots with respect to number of validation steps as well as with respect to wall-clock time. Report the validation answer reward curves. Comment on the findings, including any other metrics that have a noticeable trend such as entropy and response length. Compare the entropy of the model's responses over training to what you observed in the EI experiment. % [cite: 990, 991, 992, 993, 994, 995]
+
+\textbf{Answer:}
+% Write your answer and include your plots here
+
+
+\section*{Problem (grpo\_off\_policy\_clip\_ablation): Off-policy GRPO-Clip ablation (2 points)} % [cite: 1003]
+Deliverable: Implement the unclipped per-token loss as a new loss type "GRPO-No-Clip". Take your best performing off-policy hyperparameters from the previous problem and run the unclipped version of the loss. Report the validation answer reward curves. Comment on the findings compared to your GRPO-Clip run, including any other metrics that have a noticeable trend such as entropy, response length, and gradient norm. % [cite: 1004, 1005, 1006]
+
+\textbf{Answer:}
+% Write your answer and include your plots here
+
+
+\section*{Problem (grpo\_prompt\_ablation): Prompt ablation (2 points)} % [cite: 1012]
+Deliverable: Report the validation answer reward curves for both the R1-Zero prompt and the question-only prompt. How do metrics compare, including any other metrics that have a noticeable trend such as entropy, response length, and gradient norm? Try to explain your findings. % [cite: 1013, 1014, 1015]
+
+\textbf{Answer:}
+% Write your answer and include your plots here
+
+
+\end{document}

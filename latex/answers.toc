@@ -1,0 +1,5 @@
+\contentsline {section}{\numberline {1}Measuring Zero-Shot MATH Performance}{2}{section.1}%
+\contentsline {section}{\numberline {2}Supervised Fine-Tuning (SFT)}{3}{section.2}%
+\contentsline {section}{\numberline {3}Expert Iteration for MATH}{5}{section.3}%
+\contentsline {section}{\numberline {4}Group Relative Policy Optimization (GRPO)}{6}{section.4}%
+\contentsline {section}{\numberline {5}GRPO Experiments}{9}{section.5}%

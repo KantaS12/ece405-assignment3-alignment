@@ -39,7 +39,7 @@ VAL_SIZE: int = 1024
 VAL_EVERY: int = 5
 
 LOSS_TYPE: Literal["no_baseline", "reinforce_with_baseline", "grpo_clip"] = "reinforce_with_baseline"
-USE_STD_NORMALIZATION: bool = True
+USE_STD_NORMALIZATION: bool = False
 
 # Derived constants (validated at import time)
 assert TRAIN_BATCH_SIZE % GRADIENT_ACCUMULATION_STEPS == 0
