@@ -169,3 +169,6 @@ cython_debug/
 cs336_alignment/scripts/*
 cs336_alignment/scripts/logs/
 cs336_alignment/scripts/err/
+
+latex/
+.conda/

@@ -7,25 +7,43 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from drgrpo_grader import r1_zero_reward_fn
 
 
+def extract_boxed(solution: str) -> str | None:
+    """Extract the innermost \\boxed{...} content, handling nested braces."""
+    idx = solution.rfind(r'\boxed{')
+    if idx == -1:
+        return None
+    depth = 0
+    start = idx + len(r'\boxed{')
+    for i, c in enumerate(solution[start:], start):
+        if c == '{':
+            depth += 1
+        elif c == '}':
+            if depth == 0:
+                return solution[start:i]
+            depth -= 1
+    return None
+
+
 def main():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    math_model_path = os.path.abspath(os.path.join(script_dir, "../models/Qwen_Qwen2.5-Math-1.5B"))
-    test_jsonl_path = os.path.abspath(os.path.join(script_dir, "../data/gsm8k/test.jsonl"))
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    math_model_path = os.path.join(script_dir, "models/Qwen_Qwen2.5-Math-1.5B")
+    test_jsonl_path = os.path.abspath(os.path.join(script_dir, "../data/math/test.jsonl"))
     r1_zero_prompt_path = os.path.abspath(os.path.join(script_dir, "prompts/r1_zero.prompt"))
 
     # Load r1_zero prompt template
     with open(r1_zero_prompt_path, "r") as f:
         r1_zero_template = f.read()
 
-    # Load math validation examples from gsm8k test split
+    # Load math validation examples from MATH test split
     math_examples = []
     with open(test_jsonl_path, "r") as f:
         for line in f:
             if line.strip():
                 data = json.loads(line)
-                question = data["question"]
-                raw_answer = data["answer"]
-                ground_truth = raw_answer.split("####")[-1].strip()
+                question = data["problem"]
+                ground_truth = extract_boxed(data["solution"])
+                if ground_truth is None:
+                    continue
                 math_examples.append((question, ground_truth))
 
     # Determine device
@@ -100,7 +118,7 @@ def main():
     # Serialize results
     output_dir = os.path.join(script_dir, "output")
     os.makedirs(output_dir, exist_ok=True)
-    output_filename = os.path.join(output_dir, "Qwen_Math_1.5B_gsm8k_r1zero_results.json")
+    output_filename = os.path.join(output_dir, "Qwen_Math_1.5B_math_r1zero_results.json")
     with open(output_filename, "w") as f:
         json.dump(all_results, f, indent=4)
 

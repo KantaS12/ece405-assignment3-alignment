@@ -2,4 +2,15 @@
 \providecommand\hyper@newdestlabel[2]{}
 \providecommand\HyField@AuxAddToFields[1]{}
 \providecommand\HyField@AuxAddToCoFields[2]{}
-\gdef \@abspage@last{5}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces SFT validation loss curves (left) and final validation accuracy by dataset size (right).}}{3}{figure.1}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Expert iteration validation accuracy (left) and response entropy (right) across EI steps for different rollout configurations.}}{4}{figure.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Validation answer reward vs.\ GRPO steps (\texttt  {reinforce\_with\_baseline}, lr=1e-5).}}{6}{figure.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Validation answer reward across learning rates (\texttt  {reinforce\_with\_baseline}).}}{6}{figure.4}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces GRPO training dynamics across learning rates and baseline configurations: validation answer reward (top-left), train answer reward (top-right), token entropy (bottom-left), and gradient norm (bottom-right). Higher learning rates show spiking gradient norms and reward collapse, while \texttt  {lr=1e-5} remains stable throughout.}}{7}{figure.5}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Validation answer reward for \texttt  {no\_baseline} vs.\ \texttt  {reinforce\_with\_baseline} (both lr=1e-5).}}{8}{figure.6}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces Validation answer reward for \texttt  {masked\_mean} vs.\ \texttt  {masked\_normalize} (\texttt  {reinforce\_with\_baseline}, lr=1e-5). \texttt  {masked\_mean} converges faster and reaches a higher final reward; \texttt  {masked\_normalize} shows slightly slower convergence due to implicit length bias.}}{9}{figure.7}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces Validation answer reward for \texttt  {use\_std\_normalization=True} vs.\ \texttt  {False} (\texttt  {reinforce\_with\_baseline}, lr=1e-5). Without std normalization, training collapses catastrophically around step 120.}}{10}{figure.8}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {9}{\ignorespaces Off-policy GRPO-Clip pilot run (\texttt  {epochs=1, train\_bs=256, lr=1e-5}): validation answer reward vs.\ steps (top-left), vs.\ wall-clock time (top-right), token entropy (bottom-left), and gradient norm (bottom-right).}}{11}{figure.9}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {10}{\ignorespaces Validation answer reward for GRPO-Clip vs.\ GRPO-No-Clip (\texttt  {epochs=1, train\_bs=256, lr=1e-5}). No-Clip matches Clip through step 100 then collapses.}}{12}{figure.10}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {11}{\ignorespaces Validation answer reward for R1-Zero prompt vs.\ question-only prompt (\texttt  {grpo\_clip, epochs=1, train\_bs=256, lr=1e-5}). The question-only run produces zero reward at every checkpoint.}}{12}{figure.11}\protected@file@percent }
+\gdef \@abspage@last{12}

@@ -227,6 +227,13 @@ def grpo_microbatch_train_step(
         assert cliprange is not None, "cliprange must be provided for grpo_clip loss"
         loss, metadata = compute_grpo_clip_loss(advantages, policy_log_probs, old_log_probs, cliprange)
 
+    elif loss_type == "GRPO-No-CLIP":
+        assert advantages is not None, "advantages must be provided for grpo_no_clip loss"
+        assert old_log_probs is not None, "old_log_probs must be provided for GRPO-No-CLIP loss"
+        log_ratio = policy_log_probs - old_log_probs
+        ratio = torch.exp(log_ratio)
+        loss = -advantages * ratio
+
     # Average over sequence (masked), then over batch -> scalar
     # Masked Mean
     masked_loss = masked_mean(loss, response_mask, dim=1).mean()
@@ -290,6 +297,13 @@ def grpo_microbatch_train_step_mean_normalized(
         assert old_log_probs is not None, "old_log_probs must be provided for grpo_clip loss"
         assert cliprange is not None, "cliprange must be provided for grpo_clip loss"
         loss, metadata = compute_grpo_clip_loss(advantages, policy_log_probs, old_log_probs, cliprange)
+
+    elif loss_type == "GRPO-No-CLIP":
+        assert advantages is not None, "advantages must be provided for GRPO-No-CLIP loss"
+        assert old_log_probs is not None, "old_log_probs must be provided for GRPO-No-CLIP loss"
+        log_ratio = policy_log_probs - old_log_probs
+        ratio = torch.exp(log_ratio)
+        loss = -advantages * ratio
 
     # Masked Normalize
     masked_loss = masked_normalize(loss, response_mask, dim=1).mean()

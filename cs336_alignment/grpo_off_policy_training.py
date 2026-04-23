@@ -44,16 +44,15 @@ MICRO_TRAIN_BATCH_SIZE: int = 2
 
 N_PROMPTS_PER_ROLLOUT = ROLLOUT_BATCH_SIZE // GROUP_SIZE
 
-# Prompt template
-with open(os.path.join(SCRIPT_DIR, "prompts/r1_zero.prompt")) as _f:
-    _R1_TEMPLATE = _f.read().strip()
 STOP_STR = "</answer>"
 
+_PROMPT_TEMPLATE: str = ""  # set in main() based on --prompt-template
 
+# Prompting
 def build_prompt(question: str) -> str:
-    return _R1_TEMPLATE.format(question=question)
+    return _PROMPT_TEMPLATE.format(question=question)
 
-
+# Utility
 def _get_field(item: dict, *keys: str) -> str:
     for k in keys:
         if k in item:
@@ -81,7 +80,7 @@ def init_vllm(model_path: str, device: str, seed: int,
             max_model_len=SAMPLING_MAX_TOKENS + 512,
         )
 
-
+# Load policy weights into vLLM model.
 def load_policy_into_vllm(policy: torch.nn.Module, llm: LLM) -> None:
     state_dict = policy.state_dict()
     llm_model = llm.llm_engine.model_executor.driver_worker.model_runner.model
@@ -90,6 +89,7 @@ def load_policy_into_vllm(policy: torch.nn.Module, llm: LLM) -> None:
 
 # Helper Functions
 
+# Compute log-probs of the given labels under curr policy.
 def compute_policy_log_probs(
     policy: torch.nn.Module,
     input_ids: torch.Tensor,
@@ -102,6 +102,7 @@ def compute_policy_log_probs(
     return log_probs.gather(-1, labels.unsqueeze(-1)).squeeze(-1)
 
 
+# Compute log-probs and mean token-level entropy over the response (for monitoring).
 def compute_policy_log_probs_and_entropy(
     policy: torch.nn.Module,
     input_ids: torch.Tensor,
@@ -256,7 +257,15 @@ def main(
     epochs_per_rollout_batch: int = typer.Option(1, help="Gradient epochs over each rollout batch (>1 = off-policy)"),
     train_batch_size: int = typer.Option(256, help="Tokens per optimizer step. Must divide ROLLOUT_BATCH_SIZE=256. "
                                                     "GRADIENT_ACCUMULATION_STEPS auto-derived to keep microbatch=2."),
+    loss_type: str = typer.Option("grpo_clip", help="Loss type: grpo_clip or GRPO-No-CLIP"),
+    prompt_template: str = typer.Option("r1_zero", help="Prompt template name (without .prompt extension) from prompts/"),
 ):
+    global _PROMPT_TEMPLATE
+    prompt_path = os.path.join(SCRIPT_DIR, "prompts", f"{prompt_template}.prompt")
+    assert os.path.exists(prompt_path), f"Prompt template not found: {prompt_path}"
+    with open(prompt_path) as _f:
+        _PROMPT_TEMPLATE = _f.read().strip()
+    assert loss_type in ("grpo_clip", "GRPO-No-CLIP"), f"loss_type must be grpo_clip or GRPO-No-CLIP, got {loss_type}"
     assert ROLLOUT_BATCH_SIZE % train_batch_size == 0, \
         f"train_batch_size={train_batch_size} must divide ROLLOUT_BATCH_SIZE={ROLLOUT_BATCH_SIZE}"
     assert train_batch_size % MICRO_TRAIN_BATCH_SIZE == 0, \
@@ -272,9 +281,10 @@ def main(
 
     data_path = data_path or os.path.join(SCRIPT_DIR, "../data/math/train.jsonl")
     model_tag = os.path.basename(model_path.rstrip("/"))
+    loss_tag = loss_type.lower().replace("-", "_")
     output_dir = output_dir or os.path.join(
         SCRIPT_DIR,
-        f"../models/{model_tag}_grpo_clip_ep{epochs_per_rollout_batch}_tb{train_batch_size}_lr{lr:.0e}"
+        f"../models/{model_tag}_{loss_tag}_{prompt_template}_ep{epochs_per_rollout_batch}_tb{train_batch_size}_lr{lr:.0e}"
     )
     os.makedirs(output_dir, exist_ok=True)
 
@@ -301,7 +311,7 @@ def main(
         train_items = [all_items[i] for i in idx[VAL_SIZE:]]
 
     print(f"Train: {len(train_items)}  Val: {len(val_items)}")
-    print(f"loss_type=grpo_clip  epochs_per_rollout={epochs_per_rollout_batch}  "
+    print(f"loss_type={loss_type}  epochs_per_rollout={epochs_per_rollout_batch}  "
           f"train_batch_size={train_batch_size}  grad_accum={gradient_accumulation_steps}  "
           f"n_train_batches_per_rollout={n_train_batches_per_rollout}  "
           f"rollout_batch={ROLLOUT_BATCH_SIZE}  group_size={GROUP_SIZE}")
@@ -330,7 +340,7 @@ def main(
     for grpo_step in range(n_grpo_steps):
         t_step_start = time.time()
         sep = "=" * 60
-        print(f"\n{sep}\nGRPO Step {grpo_step + 1}/{n_grpo_steps}  grpo_clip\n{sep}")
+        print(f"\n{sep}\nGRPO Step {grpo_step + 1}/{n_grpo_steps}  {loss_type}\n{sep}")
 
         # Rollout
         policy.eval()
@@ -419,7 +429,7 @@ def main(
                         policy_log_probs=policy_log_probs,
                         response_mask=response_mask,
                         gradient_accumulation_steps=gradient_accumulation_steps,
-                        loss_type="grpo_clip",
+                        loss_type=loss_type,
                         raw_rewards=None,
                         advantages=mb_advantages,
                         old_log_probs=old_lp,

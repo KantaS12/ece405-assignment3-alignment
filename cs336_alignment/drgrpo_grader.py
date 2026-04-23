@@ -35,7 +35,6 @@ from sympy.parsing.latex import parse_latex
 from sympy.parsing.sympy_parser import parse_expr
 
 
-# Dan Hendrycks' code
 def mathd_normalize_answer(answer: Optional[str]) -> Optional[str]:
     if answer is None:
         return None
@@ -189,16 +188,23 @@ unit_texts = [
 unit_texts.extend([t + "s" for t in unit_texts])
 
 
+# Stripping out units and non-eseential words from text.
 def _strip_string(string):
+
+    # fix \frac1b or \frac12
     def _fix_fracs(string):
         substrs = string.split("\\frac")
         new_str = substrs[0]
         if len(substrs) > 1:
             substrs = substrs[1:]
+
+            # If the substring after \frac starts with {, then it's in the corret format.
             for substr in substrs:
                 new_str += "\\frac"
                 if substr[0] == "{":
                     new_str += substr
+                
+                # Else, we need to fix the format. 
                 else:
                     try:
                         assert len(substr) >= 2
@@ -221,6 +227,7 @@ def _strip_string(string):
         string = new_str
         return string
 
+    # 
     def _fix_a_slash_b(string):
         if len(string.split("/")) != 2:
             return string

@@ -4,31 +4,15 @@ set -euo pipefail
 uv run pytest -v ./tests --junitxml=test_results.xml || true
 echo "Done running tests"
 
-# Set the name of the output tar.gz file
+# Set the name of the output zip file
 output_file="cs336-spring2025-assignment-5-submission.zip"
-rm "$output_file" || true
+rm -f "$output_file"
 
-# Compress all files in the current directory into a single zip file
-zip -r "$output_file" . \
-    -x '*egg-info*' \
-    -x '*mypy_cache*' \
-    -x '*pytest_cache*' \
-    -x '*build*' \
-    -x '*ipynb_checkpoints*' \
-    -x '*__pycache__*' \
-    -x '*.pkl' \
-    -x '*.pickle' \
-    -x '*.txt' \
-    -x '*.log' \
-    -x '*.json' \
-    -x '*.out' \
-    -x '*.err' \
-    -x '.git*' \
-    -x '.venv/*' \
-    -x '*.bin' \
-    -x '*.pt' \
-    -x '*.pth' \
-    -x '*.safetensors' \
-    -x ./data/\*
+# Zip only git-tracked files, excluding latex/ and leaderboard.csv
+git ls-files \
+    | grep -v '^latex/' \
+    | grep -v '^cs336_alignment/output/leaderboard.csv' \
+    | grep -v '^--annotators_config' \
+    | zip "$output_file" -@
 
 echo "All files have been compressed into $output_file"

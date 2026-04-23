@@ -1,4 +1,7 @@
-#!/usr/bin/env python3
+"""
+The name of the file is wrong but this is for normalized training with reinforce with baseline loss. 
+"""
+
 import os
 import sys
 import json

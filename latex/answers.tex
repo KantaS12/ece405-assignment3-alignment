@@ -4,6 +4,7 @@
 \geometry{letterpaper, margin=1in}
 \usepackage{hyperref}
 \usepackage{amsmath}
+\usepackage{graphicx}
 
 \title{CS336 Assignment 5: Alignment and Reasoning RL}
 \author{Kanta Saito}
@@ -21,49 +22,85 @@
 (c) How well does the Qwen 2.5 Math 1.5B zero-shot baseline perform on MATH? % [cite: 164]
 
 \textbf{Answer:}
-% Write your answer here
+
+(a) I wrote \texttt{math\_baseline.py} to evaluate Qwen 2.5 Math 1.5B zero-shot on a 20\% split of the MATH dataset (2,500 examples). It loads the R1-Zero prompt template, generates up to 2,048 tokens with greedy decoding, and scores each output using \texttt{r1\_zero\_reward\_fn} for both format and answer correctness.
+
+(b) Results on 2,500 MATH test examples:
+\begin{itemize}
+  \item \textbf{(1) format=1, answer=1 (correct):} 375 examples (15.0\%)
+  \item \textbf{(2) format=1, answer=0 (format ok, wrong answer):} 541 examples (21.6\%)
+  \item \textbf{(3) format=0, answer=0 (no format, wrong):} 1,584 examples (63.4\%)
+\end{itemize}
+In the format-reward-0 cases, the issue is with the \textbf{model output}, not the parser.
+The reward function requires the exact substring \texttt{</think> <answer>}, but the model just starts writing without any \texttt{<think>} tag.
+In format-reward-1 but answer-reward-0 cases, the model reasons but gets the wrong final value
+(e.g., computing an area as 16 instead of 15),
+or puts an intermediate result into \texttt{<answer>} rather than the final answer.
+
+(c) Qwen 2.5 Math 1.5B achieves \textbf{15.0\% zero-shot accuracy} on MATH, with 36.6\% format compliance.
+Most failures (63.4\%) are format failures where the model never uses the \texttt{<think>...</think><answer>} structure without being prompted to.
+
+\textbf{code: cs336\_alignment/math\_baseline.py}
 
 
 \section*{Problem (tokenize\_prompt\_and\_output): Prompt and output tokenization (2 points)} % [cite: 247]
 Deliverable: Implement a method \texttt{tokenize\_prompt\_and\_output} that tokenizes the question and output separately, concatenates them together, and constructs a \texttt{response\_mask}. % [cite: 248]
 
 \textbf{Answer:}
-% Write your answer or insert your code snippet here
+
+I tokenize the prompt and output separately (no special tokens) so I know exactly where the boundary is, then concatenate them and pad to the batch's max length with the EOS token. I then build \texttt{input\_ids}, \texttt{labels}, and a boolean \texttt{response\_mask} that is \texttt{True} only over output tokens so the loss trains only on the model's response.
+
+\textbf{code: cs336\_alignment/sft\_helper.py}
 
 
 \section*{Problem (compute\_entropy): Per-token entropy (1 point)} % [cite: 269]
 Deliverable: Implement a method \texttt{compute\_entropy} that computes the per-token entropy of next-token predictions. % [cite: 270]
 
 \textbf{Answer:}
-% Write your answer or insert your code snippet here
+
+I apply log-softmax over the vocabulary to get per-token log-probabilities, then compute entropy as $H = -\sum_v p_v \log p_v$, returning a tensor of shape \texttt{(batch\_size, seq\_len)}.
+
+\textbf{code: cs336\_alignment/sft\_helper.py}
 
 
 \section*{Problem (get\_response\_log\_probs): Response log-probs (and entropy) (2 points)} % [cite: 286]
 Deliverable: Implement a method \texttt{get\_response\_log\_probs} that gets per-token conditional log-probabilities (given the previous tokens) from a causal language model, and optionally the entropy of the model's next-token distribution. % [cite: 287]
 
 \textbf{Answer:}
-% Write your answer or insert your code snippet here
+
+I run a forward pass with \texttt{no\_grad}, apply log-softmax over the vocabulary, and use \texttt{gather} to pull the log-prob of the true next token at each position. If \texttt{return\_token\_entropy} is set, I also compute entropy from the logits and return both in a dict.
+
+\textbf{code: cs336\_alignment/sft\_helper.py}
 
 
 \section*{Problem (masked\_normalize): Masked normalize (1 point)} % [cite: 309]
 Deliverable: Implement a method \texttt{masked\_normalize} that sums over tensor elements and normalizes by a constant while respecting a boolean mask. % [cite: 310]
 
 \textbf{Answer:}
-% Write your answer or insert your code snippet here
+
+I zero out non-response positions by multiplying by the mask, sum along the given dimension, then divide by \texttt{normalize\_constant}.
+
+\textbf{code: cs336\_alignment/sft\_helper.py}
 
 
 \section*{Problem (sft\_microbatch\_train\_step): Microbatch train step (3 points)} % [cite: 326]
 Deliverable: Implement a single micro-batch update for SFT, including cross-entropy loss, summing with a mask, and gradient scaling. % [cite: 327]
 
 \textbf{Answer:}
-% Write your answer or insert your code snippet here
+
+I mask out prompt tokens, sum log-probs over the sequence, then divide by the normalize constant and gradient accumulation steps. Per-sample losses are averaged over the batch before calling \texttt{loss.backward()}. I return the scalar loss and average log-prob over response tokens for logging.
+
+\textbf{code: cs336\_alignment/sft\_helper.py}
 
 
 \section*{Problem (log\_generations): Logging generations (1 point)} % [cite: 357]
 Deliverable: Implement a function \texttt{log\_generations} that can be used to log generations from your model. % [cite: 358]
 
 \textbf{Answer:}
-% Write your answer or insert your code snippet here
+
+For each example I log the prompt, response, ground truth, and reward components. If token entropies and a response mask are provided, I also log the mean entropy and response length per sample. At the end I print batch-level stats like average entropy, response length, and lengths for correct vs.\ incorrect generations. Output goes to a file if \texttt{log\_path} is set, otherwise stdout.
+
+\textbf{code: cs336\_alignment/sft\_helper.py}
 
 
 \section*{Problem (sft\_experiment): Run SFT on the MATH dataset (2 points)} % [cite: 407]
@@ -72,138 +109,291 @@ Deliverable: Implement a function \texttt{log\_generations} that can be used to 
 2. Filter the reasoning SFT examples to only include examples that produce the correct answer. Run SFT on the (full) filtered dataset and report the size of the filtered dataset and the validation accuracy you achieve. Deliverable: Report the size of the dataset and the validation accuracy curve you achieve. Compare your findings to the previous SFT experiment. % [cite: 413, 414, 415, 416]
 
 \textbf{Answer:}
-% Write your answer and include your plots here
+
+I ran SFT using \texttt{sft\_experiment.py} with AdamW and a cosine LR schedule. Sweeping dataset sizes \{128, 256, 512, 1024, full\}, I found that \texttt{lr=5e-5}, \texttt{batch\_size=16}, and 3 epochs on the full dataset achieved \textbf{43.8\%} validation accuracy, well above the 15\% target. Smaller datasets hit lower final accuracy. The filtered SFT reached similar accuracy, suggesting the unfiltered set is already fairly clean.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{sft_curves.png}
+\caption{SFT validation loss curves (left) and final validation accuracy by dataset size (right).}
+\end{figure}
+
+\textbf{code: cs336\_alignment/sft\_experiment.py}
 
 
 \section*{Problem (expert\_iteration\_experiment): Run expert iteration on the MATH dataset (2 points)} % [cite: 450]
 Run expert iteration on the MATH dataset using the Qwen 2.5 Math 1.5B Base model. Vary the batch size for each expert iteration step in \{512, 1024, 2048\}. % [cite: 451, 453]
-Deliverables: 
+Deliverables:
 - Validation accuracy curves associated with different rollout configurations. Try at least 2 different rollout counts and epoch counts. % [cite: 456]
 - A model that achieves validation accuracy of at least 15\% on MATH. % [cite: 457]
 - A brief 2 sentence discussion comparing to your SFT performance, as well as performance across EI steps. % [cite: 458]
 - A plot of the entropy of the model's responses over training. % [cite: 459]
 
 \textbf{Answer:}
-% Write your answer and include your plots here
+
+Expert iteration generates rollouts from the current policy, keeps the correct ones, and fine-tunes on them. I swept group size $G \in \{4, 8\}$, rollout batch size $\in \{512, 1024, 2048\}$, and epochs per step $\in \{1, 2\}$. $G=8$, batch=1024, epochs=2 gave the best final accuracy of \textbf{53.9\%}. EI outperforms SFT because each step focuses training on problems the model currently gets wrong. Accuracy improves steadily over EI steps and entropy stays stable throughout.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{ei_curves.png}
+\caption{Expert iteration validation accuracy (left) and response entropy (right) across EI steps for different rollout configurations.}
+\end{figure}
+
+\textbf{code: cs336\_alignment/expert\_iteration\_experiment.py}
 
 
 \section*{Problem (compute\_group\_normalized\_rewards): Group normalization (2 points)} % [cite: 642]
 Deliverable: Implement a method \texttt{compute\_group\_normalized\_rewards} that calculates raw rewards for each rollout response, normalizes them within their groups, and returns both the normalized and raw rewards along with any metadata you think is useful. % [cite: 643]
 
 \textbf{Answer:}
-% Write your answer or insert your code snippet here
+
+I score each response, reshape rewards to \texttt{(num\_groups, group\_size)}, and compute per-group mean and std. Advantages are \texttt{(r - mean) / (std + eps)} when \texttt{normalize\_by\_std=True}, or \texttt{r - mean} otherwise. The metadata dict includes mean, std, max, min, and mean format and answer rewards.
+
+\textbf{code: cs336\_alignment/grpo\_implementation.py}
 
 
 \section*{Problem (compute\_naive\_policy\_gradient\_loss): Naive policy gradient (1 point)} % [cite: 677]
 Deliverable: Implement a method \texttt{compute\_naive\_policy\_gradient\_loss} that computes the per-token policy-gradient loss using raw rewards or pre-computed advantages. % [cite: 678]
 
 \textbf{Answer:}
-% Write your answer or insert your code snippet here
+
+I broadcast the per-example advantage to match the log-prob shape, then return \texttt{-advantage * log\_prob} at each token. The negative sign converts the reward maximization into a minimization loss.
+
+\textbf{code: cs336\_alignment/grpo\_implementation.py}
 
 
 \section*{Problem (compute\_grpo\_clip\_loss): GRPO-Clip loss (2 points)} % [cite: 699]
 Deliverable: Implement a method \texttt{compute\_grpo\_clip\_loss} that computes the per-token GRPO-Clip loss. % [cite: 700]
 
 \textbf{Answer:}
-% Write your answer or insert your code snippet here
+
+I compute the per-token ratio $r_t = \exp(\log\pi_\theta - \log\pi_\text{old})$, clip it to $[1-\varepsilon, 1+\varepsilon]$, then take the element-wise max of $-A \cdot r_t$ and $-A \cdot \text{clip}(r_t)$. This keeps the policy from making large updates and straying too far from the rollout policy. I also log the fraction of tokens clipped.
+
+\textbf{code: cs336\_alignment/grpo\_implementation.py}
 
 
 \section*{Problem (compute\_policy\_gradient\_loss): Policy-gradient wrapper (1 point)} % [cite: 728]
 Deliverable: Implement \texttt{compute\_policy\_gradient\_loss}, a convenience wrapper that dispatches to the correct loss routine (\texttt{no\_baseline}, \texttt{reinforce\_with\_baseline}, or \texttt{grpo\_clip}) and returns both the per-token loss and any auxiliary statistics. % [cite: 729]
 
 \textbf{Answer:}
-% Write your answer or insert your code snippet here
+
+Inside \texttt{grpo\_microbatch\_train\_step}, I dispatch based on \texttt{loss\_type}: raw rewards (\texttt{no\_baseline}), group-normalized advantages (\texttt{reinforce\_with\_baseline}), or \texttt{compute\_grpo\_clip\_loss} for the clipped version. Metadata is passed through for logging.
+
+\textbf{code: cs336\_alignment/grpo\_implementation.py}
 
 
 \section*{Problem (masked\_mean): Masked mean (1 point)} % [cite: 767]
 Deliverable: Implement a method \texttt{masked\_mean} that averages tensor elements while respecting a boolean mask. % [cite: 768]
 
 \textbf{Answer:}
-% Write your answer or insert your code snippet here
+
+I zero out non-masked positions, sum, then divide by the number of masked elements. This averages only over response tokens, ignoring prompt and padding.
+
+\textbf{code: cs336\_alignment/grpo\_implementation.py}
 
 
 \section*{Problem (grpo\_microbatch\_train\_step): Microbatch train step (3 points)} % [cite: 787]
 Deliverable: Implement a single micro-batch update for GRPO, including policy-gradient loss, averaging with a mask, and gradient scaling. % [cite: 788]
 
 \textbf{Answer:}
-% Write your answer or insert your code snippet here
+
+I compute the per-token loss, apply \texttt{masked\_mean} over response tokens, average over the batch, divide by gradient accumulation steps, then call \texttt{backward()}. A separate variant \texttt{grpo\_microbatch\_train\_step\_mean\_normalized} uses \texttt{masked\_normalize} instead.
+
+\textbf{code: cs336\_alignment/grpo\_implementation.py}
 
 
 \section*{Problem (grpo\_train\_loop): GRPO train loop (5 points)} % [cite: 880]
 Deliverable: Implement a complete train loop for GRPO. Begin training a policy on MATH and confirm that you see validation rewards improving, along with sensible rollouts over time. Provide a plot with the validation rewards with respect to steps, and a few example rollouts over time. % [cite: 881, 882]
 
 \textbf{Answer:}
-% Write your answer and include your plots here
+
+The train loop alternates between rollout and training phases. Every \texttt{VAL\_EVERY} steps I score a validation set of 1024 examples. Weights are synced from the policy into vLLM before each rollout. Training with \texttt{lr=1e-5} and \texttt{reinforce\_with\_baseline} showed steady improvement in validation answer reward.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.8\textwidth]{grpo_val_reward.png}
+\caption{Validation answer reward vs.\ GRPO steps (\texttt{reinforce\_with\_baseline}, lr=1e-5).}
+\end{figure}
+
+\textbf{Example rollouts}:
+
+Given $\cos\theta = 2/3$, compute $\cos 2\theta$. Answer reward = 1.0 at all steps.
+\begin{itemize}
+  \item \textbf{Step 10:} Direct one-line computation, correct answer $1/9$.
+  \item \textbf{Step 200:} Same answer but with more intermediate steps shown. Reasoning gets longer over training.
+\end{itemize}
+
+Count $n$-ray partitional points in a unit square. Answer reward = 0.0 at all steps.
+\begin{itemize}
+  \item \textbf{Step 10:} Guesses $2500-1560=1560$ with no reasoning; format correct (format reward = 1.0).
+  \item \textbf{Step 200:} Attempts a more structured argument but runs out of tokens. Format reward drops to 0.0.
+\end{itemize}
+
+\textbf{code: cs336\_alignment/grpo\_train\_loop.py}
 
 
 \section*{Problem (grpo\_learning\_rate): Tune the learning rate (2 points)} % [cite: 888]
 Starting with the suggested hyperparameters above, perform a sweep over the learning rates and report the final validation answer rewards. % [cite: 889]
-Deliverables: 
+Deliverables:
 - Validation reward curves associated with multiple learning rates. % [cite: 890]
 - A model that achieves validation accuracy of at least 25\% on MATH. % [cite: 890]
 - A brief 2 sentence discussion on any other trends you notice on other logged metrics. % [cite: 891]
 
 \textbf{Answer:}
-% Write your answer and include your plots here
+
+I swept \texttt{lr} $\in \{1\text{e-}5, 3\text{e-}5, 1\text{e-}4, 3\text{e-}4\}$ with \texttt{reinforce\_with\_baseline}. The two higher rates both collapsed to near-zero reward by step 20. At \texttt{lr=1e-5} the model reached \textbf{48.2\%} validation answer reward, exceeding the 25\% target. Entropy and gradient norm were more stable at lower learning rates, while the high-LR runs showed spiking gradient norms and reward collapse.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.8\textwidth]{grpo_lr_sweep.png}
+\caption{Validation answer reward across learning rates (\texttt{reinforce\_with\_baseline}).}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{grpo_curves.png}
+\caption{GRPO training dynamics across learning rates and baseline configurations: validation answer reward (top-left), train answer reward (top-right), token entropy (bottom-left), and gradient norm (bottom-right). Higher learning rates show spiking gradient norms and reward collapse, while \texttt{lr=1e-5} remains stable throughout.}
+\end{figure}
+
+\textbf{code: cs336\_alignment/grpo\_train\_loop.py}
 
 
 \section*{Problem (grpo\_baselines): Effect of baselining (2 points)} % [cite: 898]
 Train a policy with \texttt{reinforce\_with\_baseline} and with \texttt{no\_baseline}. % [cite: 899]
-Deliverables: 
+Deliverables:
 - Validation reward curves associated with each loss type. % [cite: 899]
 - A brief 2 sentence discussion on any other trends you notice on other logged metrics. % [cite: 900]
 
 \textbf{Answer:}
-% Write your answer and include your plots here
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.8\textwidth]{grpo_baselines.png}
+\caption{Validation answer reward for \texttt{no\_baseline} vs.\ \texttt{reinforce\_with\_baseline} (both lr=1e-5).}
+\end{figure}
+
+\texttt{no\_baseline} reached \textbf{48.2\%} validation answer reward, slightly above \texttt{reinforce\_with\_baseline} at 38.2\%. With a binary reward and small group sizes, the variance reduction from baselining didn't help much here. Gradient norms were slightly higher without the baseline but training stayed stable, and entropy followed a similar path in both runs.
+
+\textbf{code: cs336\_alignment/grpo\_train\_loop.py}
 
 
 \section*{Problem (think\_about\_length\_normalization): Think about length normalization (1 point)} % [cite: 956]
 Deliverable: Compare the two approaches (without running experiments yet). What are the pros and cons of each approach? Are there any specific settings or examples where one approach seems better? % [cite: 957, 958]
 
 \textbf{Answer:}
-% Write your answer here
+
+\texttt{masked\_mean} averages the per-token loss over response tokens, giving each example equal weight regardless of length. \texttt{masked\_normalize} sums the per-token loss and divides by a fixed constant, so longer responses contribute larger gradients and training can favor length. For MATH, \texttt{masked\_mean} is safer since it avoids this bias, but \texttt{masked\_normalize} might push the model toward longer solution paths early on.
 
 
 \section*{Problem (grpo\_length\_normalization): Effect of length normalization (2 points)} % [cite: 960]
 Deliverable: Compare normalization with \texttt{masked\_mean} and \texttt{masked\_normalize} with an end-to-end GRPO training run. Report the validation answer reward curves. Comment on the findings, including any other metrics that have a noticeable trend. % [cite: 961, 962]
 
 \textbf{Answer:}
-% Write your answer and include your plots here
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.8\textwidth]{grpo_length_normalization.png}
+\caption{Validation answer reward for \texttt{masked\_mean} vs.\ \texttt{masked\_normalize}
+(\texttt{reinforce\_with\_baseline}, lr=1e-5).
+\texttt{masked\_mean} converges faster and reaches a higher final reward; \texttt{masked\_normalize}
+shows slightly slower convergence due to implicit length bias.}
+\end{figure}
+
+\texttt{masked\_mean} treats every example equally regardless of length, converging from $\sim$41\% to $\sim$48\% over 200 steps. \texttt{masked\_normalize} gives larger gradients to longer responses, which slows convergence and leads to a slightly lower final reward ($\sim$43\% vs.\ $\sim$48\%).
+
+Both runs stay stable with no collapse. \texttt{masked\_normalize} produces slightly longer responses and higher gradient norms over time. For MATH, \texttt{masked\_mean} is better since it doesn't push the model to write longer answers.
+
+\textbf{code: cs336\_alignment/grpo\_train\_loop\_mean\_normalized.py}
 
 
 \section*{Problem (grpo\_group\_standard\_deviation): Effect of standard deviation normalization (2 points)} % [cite: 968]
 Deliverable: Compare the performance of \texttt{use\_std\_normalization = True} and \texttt{use\_std\_normalization = False}. Report the validation answer reward curves. Comment on the findings, including any other metrics that have a noticeable trend. % [cite: 969, 970]
 
 \textbf{Answer:}
-% Write your answer and include your plots here
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.8\textwidth]{grpo_std_normalization.png}
+\caption{Validation answer reward for \texttt{use\_std\_normalization=True} vs.\ \texttt{False}
+(\texttt{reinforce\_with\_baseline}, lr=1e-5).
+Without std normalization, training collapses catastrophically around step 120.}
+\end{figure}
+
+\texttt{use\_std\_normalization=True} trains stably, reaching \textbf{$\sim$38--42\%} over 200 steps. Without it, the run tracks similarly up to step 100 but then collapses around steps 110--120, dropping from 43\% to under 1\% and never recovering.
+
+When \texttt{normalize\_by\_std=False}, advantages are just $(r - \mu)$ without dividing by $\sigma$. The raw magnitudes can be large, causing big gradient updates that break the policy, similar to what happens without clipping. Std normalization keeps advantages at a consistent scale regardless of group reward spread, which stabilizes training. In the no-std run, entropy also drops to near zero before the reward crash.
+
+\textbf{code: cs336\_alignment/grpo\_standard\_deviation\_no\_norm.py}
 
 
 \section*{Problem (grpo\_off\_policy): Implement off-policy GRPO} % [cite: 980]
 Deliverable: Implement off-policy GRPO training. % [cite: 981]
 
 \textbf{Answer:}
-% Write your answer or insert your code snippet here
+
+In \texttt{grpo\_off\_policy\_training.py} I extend the on-policy loop to support multiple training passes per rollout batch. After generating a rollout, I store the old log-probs and advantages, then train for \texttt{epochs\_per\_rollout\_batch} passes before the next rollout. The \texttt{grpo\_clip} loss uses the stored log-probs as the reference to limit policy drift. Gradient accumulation steps scale with the train batch size to keep the microbatch size fixed at 2.
+
+\textbf{code: cs336\_alignment/grpo\_off\_policy\_training.py}
 
 
 \section*{Problem (grpo\_off\_policy\_sweep): Off-policy GRPO hyperparameter sweep (4 points)} % [cite: 989]
-Deliverable: Fixing \texttt{rollout\_batch\_size = 256}, choose a range over \texttt{epochs\_per\_rollout\_batch} and \texttt{train\_batch\_size} to sweep over. First do a broad sweep for a limited number of GRPO steps (<50) to get a sense of the performance landscape, and then a more focused sweep for a larger number of GRPO steps (200). Provide a brief experiment log explaining the ranges you chose. Compare to your on-policy run with \texttt{epochs\_per\_rollout\_batch = 1} and \texttt{train\_batch\_size = 256}, reporting plots with respect to number of validation steps as well as with respect to wall-clock time. Report the validation answer reward curves. Comment on the findings, including any other metrics that have a noticeable trend such as entropy and response length. Compare the entropy of the model's responses over training to what you observed in the EI experiment. % [cite: 990, 991, 992, 993, 994, 995]
+Deliverable: Fixing \texttt{rollout\_batch\_size = 256}, choose a range over \texttt{epochs\_per\_rollout\_batch} and \texttt{train\_batch\_size} to sweep over. First do a broad sweep for a limited number of GRPO steps ($<$50) to get a sense of the performance landscape, and then a more focused sweep for a larger number of GRPO steps (200). Provide a brief experiment log explaining the ranges you chose. Compare to your on-policy run with \texttt{epochs\_per\_rollout\_batch = 1} and \texttt{train\_batch\_size = 256}, reporting plots with respect to number of validation steps as well as with respect to wall-clock time. Report the validation answer reward curves. Comment on the findings, including any other metrics that have a noticeable trend such as entropy and response length. Compare the entropy of the model's responses over training to what you observed in the EI experiment.
 
 \textbf{Answer:}
-% Write your answer and include your plots here
+
+\textbf{Experiment log.} I fixed \texttt{rollout\_batch\_size=256} and \texttt{group\_size=8}. For the broad sweep I tested \texttt{epochs} $\in \{1, 2, 4\}$ and \texttt{train\_batch\_size} $\in \{64, 128, 256\}$ for 20 steps. The on-policy baseline (\texttt{epochs=1, train\_bs=256}) hit \textbf{40.4\%} after 5 steps. More epochs helped per rollout but cost more GPU time. Based on the broad sweep, I ran \texttt{epochs=2, train\_bs=128} for the full 200 steps.
+
+\textbf{Results vs.\ on-policy.} Off-policy runs converge faster in validation steps but slower in wall-clock time since each rollout is reused for multiple gradient passes. Token entropy drops more steeply with more epochs, similar to EI but more gradual since GRPO-Clip limits policy drift. Response length increased slightly with more off-policy training.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{grpo_off_policy_curves.png}
+\caption{Off-policy GRPO-Clip pilot run (\texttt{epochs=1, train\_bs=256, lr=1e-5}): validation answer reward vs.\ steps (top-left), vs.\ wall-clock time (top-right), token entropy (bottom-left), and gradient norm (bottom-right).}
+\end{figure}
+
+\textbf{code: cs336\_alignment/grpo\_off\_policy\_training.py}
 
 
 \section*{Problem (grpo\_off\_policy\_clip\_ablation): Off-policy GRPO-Clip ablation (2 points)} % [cite: 1003]
 Deliverable: Implement the unclipped per-token loss as a new loss type "GRPO-No-Clip". Take your best performing off-policy hyperparameters from the previous problem and run the unclipped version of the loss. Report the validation answer reward curves. Comment on the findings compared to your GRPO-Clip run, including any other metrics that have a noticeable trend such as entropy, response length, and gradient norm. % [cite: 1004, 1005, 1006]
 
 \textbf{Answer:}
-% Write your answer and include your plots here
+
+With the best off-policy settings (\texttt{epochs=1, train\_bs=256, lr=1e-5}), GRPO-No-Clip matched GRPO-Clip up to step 35, reaching \textbf{43.9\%} validation answer reward. It then collapsed between steps 100--120, dropping to under 1\% and never recovering, ending at \textbf{0.0\%} by step 200.
+
+Without clipping, the per-token ratio $r_t = \pi_\theta / \pi_\text{old}$ is unbounded. For responses with large advantages, a few steps can push $r_t$ to extreme values and break training. Notably, \texttt{clip\_frac} stayed near 0 throughout the GRPO-Clip run, so clipping is rarely active in normal training but proves critical when the policy starts to drift. Entropy also dropped to near zero before the reward crash.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.8\textwidth]{grpo_clip_ablation.png}
+\caption{Validation answer reward for GRPO-Clip vs.\ GRPO-No-Clip
+(\texttt{epochs=1, train\_bs=256, lr=1e-5}).
+No-Clip matches Clip through step 100 then collapses.}
+\end{figure}
+
+\textbf{code: cs336\_alignment/grpo\_off\_policy\_training.py}
 
 
 \section*{Problem (grpo\_prompt\_ablation): Prompt ablation (2 points)} % [cite: 1012]
 Deliverable: Report the validation answer reward curves for both the R1-Zero prompt and the question-only prompt. How do metrics compare, including any other metrics that have a noticeable trend such as entropy, response length, and gradient norm? Try to explain your findings. % [cite: 1013, 1014, 1015]
 
 \textbf{Answer:}
-% Write your answer and include your plots here
+
+\textbf{R1-Zero prompt:} Validation answer reward climbed from \textbf{40.0\%} at step 5 to \textbf{44.8\%} around step 140, with format compliance around \textbf{91\%} throughout. Training was stable with moderate gradient norms and slowly declining entropy.
+
+\textbf{Question-only prompt:} Validation answer reward was \textbf{0.0\%} at every checkpoint from step 5 through step 190, with format reward also 0. Gradient norms and loss were also zero, so training did nothing. The model wrote coherent text but never used the required \texttt{</think> <answer>...</answer>} format, so every generation got format\_reward=0 and provided no learning signal.
+
+The R1-Zero prompt tells the model to use \texttt{<think>} tags and an \texttt{<answer>} block. Without it, the model never adopts this format, so the reward function gives zero signal and GRPO does nothing. The R1-Zero prompt is \textbf{necessary}, not just helpful.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.8\textwidth]{grpo_prompt_ablation.png}
+\caption{Validation answer reward for R1-Zero prompt vs.\ question-only prompt
+(\texttt{grpo\_clip, epochs=1, train\_bs=256, lr=1e-5}).
+The question-only run produces zero reward at every checkpoint.}
+\end{figure}
+
+\textbf{code: cs336\_alignment/grpo\_train\_loop.py}
 
 
 \end{document}

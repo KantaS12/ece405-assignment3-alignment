@@ -1,4 +1,6 @@
-#!/usr/bin/env python3
+"""
+This is the training of GRPO w/ standard deviation normalization without normalization. 
+"""
 import os
 import sys
 import json
@@ -258,7 +260,7 @@ def evaluate_validation(
     }
 
 
-# ---------- Main training loop ----------
+# Training Loop
 
 app = typer.Typer(add_completion=False)
 
@@ -305,7 +307,7 @@ def main(
         val_items = val_items[:VAL_SIZE]
         train_items = all_items
     else:
-        # Deterministic split: first VAL_SIZE as validation holdout
+        # Split Data (Shuffle with seed then hold the val_size)
         rng = random.Random(seed)
         idx = list(range(len(all_items)))
         rng.shuffle(idx)

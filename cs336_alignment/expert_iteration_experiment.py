@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+# Expert Iteration experiment on MATH dataset (Was GSM8K)
+
 import os, sys, json, math, re, argparse, random
 import torch
 import torch.nn.functional as F
